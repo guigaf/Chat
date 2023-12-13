@@ -7,6 +7,8 @@ from queue import Queue
 import os
 import getpass
 from plyer import notification
+import plyer
+#plyer.platforms.win.notification
 
 ###################################################################################################################################################
 # Função para obter o nome de usuário
@@ -19,7 +21,6 @@ def get_username():
 
 def send_message(event=None):
     message = eMessage.get()
-    #nickname = eNickname.get()
     nickname = get_username()
     if message and nickname:
         full_message = f"{nickname}: {message}"
@@ -41,45 +42,48 @@ def send_entry_message():
     client_socket.sendall(entry_message.encode('utf-8'))
 
 def update_chat_box():
-    currentPositionInicio = stChatBox.yview()[0]
-    currentPositionFim = stChatBox.yview()[1]
+    # Ao atualizar o ChatBox ainda esta ocorrendo um bug, 
+    # caso uma UNICA mensagem tenha um tamanho horizontal maior que o tamanho do ChatBox, 
+    # ela fica "andando" sozinha na tela, isso se deve ao fato de ela se perder nos calulos de posição,
+    # pois para a ChatBox, virtualmente, ela sempre ocupa uma linha 
+    currentPositionInicio = stChatBox.yview()[0] # Grava a posição inicial do ChatBox
+    currentPositionFim = stChatBox.yview()[1] # Grava a posição final do ChatBox
 
-    jChatInterno.numMessagesNew = len(messages)
-
+    stChatBox.config(state=tk.NORMAL) # Coloca ChartBox em edição
+    stChatBox.delete(1.0, tk.END) # Deleta o conteudo do ChatBox
     with lock:
-        # Atualiza apenas caso possua mensagens novas
-        if jChatInterno.numMessagesNew > jChatInterno.numMessagesOld:
-            stChatBox.config(state=tk.NORMAL) # Coloca ChartBox em edição
-            stChatBox.delete(1.0, tk.END) # Deleta o conteudo do ChatBox
-            for item in messages:
-                if len(item) == 2:
-                    message, tag = item
-                    if tag:
-                        stChatBox.insert(tk.END, message + "\n", tag)
-                    else:
-                        stChatBox.insert(tk.END, message + "\n")
+        for item in messages:
+            if len(item) == 2:
+                message, tag = item
+                if tag:
+                    stChatBox.insert(tk.END, message + "\n", tag)
                 else:
-                    stChatBox.insert(tk.END, str(item) + "\n")
-            jChatInterno.numMessagesOld = jChatInterno.numMessagesNew # Atualiza o numero de mensagens OLD = NEW
-            # Verifica o posicionamento da janela
-            if currentPositionFim == 1.0:
-                stChatBox.yview(tk.END)
+                    stChatBox.insert(tk.END, message + "\n")
             else:
-                stChatBox.yview(tk.MOVETO, currentPositionInicio)
-            stChatBox.config(state=tk.DISABLED)
+                stChatBox.insert(tk.END, str(item) + "\n")
+    # Verifica o posicionamento da janela
+    if currentPositionFim == 1.0:
+        stChatBox.yview(tk.END)
+    else:
+        stChatBox.yview(tk.MOVETO, currentPositionInicio)
+    stChatBox.config(state=tk.DISABLED)
     jChatInterno.after(1000, update_chat_box)
 
 def windows_notification(message):
     particao = message.split(":", 1)
     msgNickname = particao[0].strip()
     myNickname = get_username()
-    if (myNickname not in msgNickname) and (jChatInterno.windowsNotification):
-        if "saiu do chat" in message and ":" not in message:
-            notification.notify(title='Saiu!', message=f'{message}.', app_name='ATENÇÃO!',)
-        elif "entrou no chat" in message and ":" not in message:
-            notification.notify(title='Entrou!', message=f'{message}.', app_name='ATENÇÃO!',)
-        else:
-            notification.notify(title='Nova Mensagem!', message=f'{msgNickname} mandou uma nova mensagem.', app_name='ATENÇÃO!',)
+    if jChatInterno.windowsNotification and myNickname not in msgNickname:
+        try:
+            if "saiu do chat" in message and ":" not in message:
+                notification.notify(title='Saiu!', message=f'{message}.', app_name='ATENÇÃO!', timeout=1, )
+            elif "entrou no chat" in message and ":" not in message:
+                notification.notify(title='Entrou!', message=f'{message}.', app_name='ATENÇÃO!', timeout=1, )
+            else:
+                notification.notify(title='Nova Mensagem!', message=f'{msgNickname} mandou uma nova mensagem.', app_name='ATENÇÃO!', timeout=1, )
+        except Exception as e:
+            print(f'Erro de notificação do Windows: {e}')
+            pass
 
 def receive_messages():
     while True:
@@ -109,7 +113,7 @@ def load_messages_from_file():
             for verifyContent in contentSplitLines:
                 verifyContentOK, tag = apply_tags(verifyContent)
                 result.append((verifyContentOK, tag))
-            return result#content.splitlines()
+            return result
     except FileNotFoundError:
         return []
     except Exception as e:
@@ -136,6 +140,7 @@ def windows_notification_false():
 current_date = datetime.now().strftime("%d-%m-%Y")
 lock = threading.Lock()
 messages = load_messages_from_file()
+print("messages: ", messages)
 nickname = get_username()
 
 # Seleciona o endereço de IP que vai se conectar, esse valor deve ser alterado quando mudar o endereço do servidor
@@ -147,12 +152,6 @@ send_entry_message()
 jChatInterno = tk.Tk()
 jChatInterno.title(f'Bem Vindo! - {nickname}')
 jChatInterno.protocol("WM_DELETE_WINDOW", on_closing)
-
-#lNickname = tk.Label(jChatInterno, text="Nome:", width=20)
-#lNickname.place(x=0, y=10)
-#
-#eNickname = tk.Entry(jChatInterno, width=20)
-#eNickname.grid(row=1, column=0, rowspan=1, columnspan=1, padx=[10, 0], pady=0, sticky='w')
 
 stChatBox = scrolledtext.ScrolledText(jChatInterno, wrap=tk.WORD, width=60, height=10)
 stChatBox.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky='nsew')
@@ -174,9 +173,9 @@ jChatInterno.grid_columnconfigure(0, weight=1)
 jChatInterno.grid_columnconfigure(1, weight=1)
 jChatInterno.grid_columnconfigure(2, weight=0)
 
-jChatInterno.numMessagesNew = 0
-jChatInterno.numMessagesOld = 0
 jChatInterno.windowsNotification = False
+
+###################################################################################################################################################
 
 menuBar = tk.Menu(jChatInterno)
 
@@ -192,6 +191,7 @@ menuBar.add_cascade(label="Arquivo", menu=fileMenu)
 
 # Adicionar a barra de menu à janela
 jChatInterno.config(menu=menuBar)
+
 ###################################################################################################################################################
 
 # Thread para receber mensagens
