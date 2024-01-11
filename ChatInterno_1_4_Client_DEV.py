@@ -7,7 +7,11 @@ from queue import Queue
 import os
 import getpass
 from plyer import notification
+import sqlite3
 #plyer.platforms.win.notification
+
+file_name = f"chat_log.db"
+messages = []
 
 ###################################################################################################################################################
 # Função para obter o nome de usuário
@@ -21,41 +25,78 @@ def get_username():
 def send_message(event=None):
     global eMessage
     global client_socket
+    global currentDate
+    global currentTime
 
     message = eMessage.get()
     nickname = get_username()
+    mensagemTipo = "mensagem"
     if message and nickname:
-        full_message = f"{nickname}: {message}"
+        full_message = f"{currentDate};{currentTime};{nickname};{message};{mensagemTipo}"
 
         client_socket.sendall(full_message.encode('utf-8'))
         eMessage.delete(0, tk.END)
 
 def send_entry_message():
     global client_socket
+    global currentDate
+    global currentTime
 
-    entry_message = f"{get_username()} entrou no chat."
-    client_socket.sendall(entry_message.encode('utf-8'))
+    message = f"entrou no chat."
+    nickname = get_username()
+    mensagemTipo = "entrada"
+    full_message = f"{currentDate};{currentTime};{nickname};{message};{mensagemTipo}"
+    client_socket.sendall(full_message.encode('utf-8'))
 
 def send_warning_message():
     global client_socket
+    global currentDate
+    global currentTime
 
-    warning_message = f"{get_username()}: --ATENÇÃO--"
-    client_socket.sendall(warning_message.encode('utf-8'))
+    message = f"--ATENÇÃO--"
+    nickname = get_username()
+    mensagemTipo = "atencao"
+    full_message = f"{currentDate};{currentTime};{nickname};{message};{mensagemTipo}"
+    client_socket.sendall(full_message.encode('utf-8'))
 
 def send_exit_message():
     global client_socket
+    global currentDate
+    global currentTime
 
-    exit_message = f"{get_username()} saiu do chat."
-    client_socket.sendall(exit_message.encode('utf-8'))
+    message = f"saiu do chat."
+    nickname = get_username()
+    mensagemTipo = "saida"
+    full_message = f"{currentDate};{currentTime};{nickname};{message};{mensagemTipo}"
+    client_socket.sendall(full_message.encode('utf-8'))
 
 def apply_tags(message):
+
+    particao = message.split(";")
+
+    idMensagem = particao[0]
+    dataHora = particao[1]
+    remetente = particao[2]
+    conteudo = particao[3]
+    tipo = particao[4]
+
     # Se a mensagem indica saída, aplica a tag "exit_message"
-    if "saiu do chat" in message and ":" not in message:
+    if "saida" in tipo:
         return message, "exit_message"
-    elif "entrou no chat" in message and ":" not in message:
+    
+    # Se a mensagem indica entrada, aplica a tag "entry_message"
+    elif "entrada" in tipo:
         return message, "entry_message"
-    elif "--ATENÇÃO--" in message:
+    
+    # Se a mensagem indica atenção, aplica a tag "warning_message"
+    elif "atencao" in tipo:
         return message, "warning_message"
+    
+    # Se a mensagem indica mensagem, não aplica tag
+    elif "mensagem" in tipo:
+        return message, None
+    
+    # Se a mensagem não indica nada, não aplica tag
     else:
         return message, None
 
@@ -93,16 +134,22 @@ def update_chat_box():
 def windows_notification(message):
     global jChatInterno
 
-    particao = message.split(":", 1)
-    msgNickname = particao[0].strip()
+    particao = message.split(";")
+
+    idMensagem = particao[0]
+    dataHora = particao[1]
+    remetente = particao[2]
+    conteudo = particao[3]
+    tipo = particao[4]
+    
+    msgNickname = remetente
     myNickname = get_username()
-    if jChatInterno.windowsNotification and myNickname not in msgNickname:
-        try:
-            if "--ATENÇÃO--" in message:
+    try:
+        if jChatInterno.windowsNotification and myNickname not in msgNickname and tipo == "atencao":
                 notification.notify(title='Atenção!', message=f'{msgNickname} esta chamando sua atenção.', app_name='ATENÇÃO!', timeout=1, )
-        except Exception as e:
-            print(f'Erro de notificação do Windows: {e}')
-            pass
+    except Exception as e:
+        print(f'Erro de notificação do Windows: {e}')
+        pass
 
 def receive_messages():
     global messages
@@ -113,46 +160,50 @@ def receive_messages():
             message = client_socket.recv(1024).decode('utf-8')
             if not message:
                 break
-            
+
             with lock:
-                message, tag = apply_tags(message)
-                messages.append((message, tag))
+                conteudo_ok, tag = apply_tags(message)
+                messages.append((conteudo_ok, tag))
                 windows_notification(message)
-
             print(f"Received message: {message}")
-
         except Exception as e:
             print(f"Error receiving message: {e}")
             break
         
         finally:
             jChatInterno.after(200, update_chat_box)
+    
+def load_messages_from_sqlite():
+    global currentDate
+    global file_name
 
-def load_messages_from_file():
-    global current_date
-    global client_socket
-
-    file_name = f"chat_log_{current_date}.txt"
     try:
-        with open(file_name, "r") as file:
-            content = file.read()
-            contentSplitLines = content.splitlines()
+        with sqlite3.connect(file_name) as conexao:
+            cursor = conexao.cursor()
+            cursor.execute("SELECT * FROM mensagens WHERE data_hora >= ?", (f"{currentDate} 00:00:00",))
+            mensagens_do_dia = cursor.fetchall()
             result = []
-            for verifyContent in contentSplitLines:
-                verifyContentOK, tag = apply_tags(verifyContent)
-                result.append((verifyContentOK, tag))
+
+            for mensagem in mensagens_do_dia:
+                mensagem_str = ';'.join(map(str, mensagem))
+                # Aplicar as tags aqui
+                conteudo_ok, tag = apply_tags(mensagem_str)
+                result.append((conteudo_ok, tag))
+            
             return result
-    except FileNotFoundError:
-        return []
     except Exception as e:
-        print(f"Error loading messages from file: {e}")
-        return []
+        pass
 
-    # Envia mensagem
-    entry_message = f"{get_username()} entrou no chat."
-    client_socket.sendall(entry_message.encode('utf-8'))
+def update_date_time():
+    global currentDate
+    global currentTime
 
-    # Recebe resposta do server
+    #while True:
+    currentDate = datetime.now().strftime("%d-%m-%Y")
+    currentTime = datetime.now().strftime("%H:%M:%S")
+
+    print("currentDate: ", currentDate)
+    print("currentTime: ", currentTime)
 
 def on_closing():
     global jChatInterno
@@ -178,8 +229,13 @@ def windows_notification_false():
 
 def thread_received_message():
     # Thread para receber mensagens
-    receive_thread = threading.Thread(target=receive_messages, daemon=True)
+    receive_thread = threading.Thread(name="thread_received_message", target=receive_messages, daemon=True)
     receive_thread.start()
+
+def thread_update_date_time():
+    # Thread atualizar a data e hora atual
+    update_date_time_thread = threading.Thread(target=update_date_time, daemon=True)
+    update_date_time_thread.start()
 
 # Função para abrir a caixa de diálogo e obter um novo endereço IP
 def new_ip_selector():
@@ -189,7 +245,6 @@ def new_ip_selector():
     global oldIp
 
     while True:
-        #newIp = open_new_window()
         newIp = simpledialog.askstring("Novo Endereço IP", "Digite o novo endereço IP:")
         if newIp:
             try:
@@ -200,7 +255,7 @@ def new_ip_selector():
                 #192.168.0.90 - marcos
 
                 oldIp = newIp
-                bAtencao.config(state=tk.DISABLED)
+                bAtencao.config(state=tk.NORMAL)
                 eMessage.config(state=tk.NORMAL)
                 break
             except Exception as e:
@@ -217,7 +272,7 @@ def new_ip_selector():
                 jChatInterno.title(f'Bem Vindo! - {nickname} - STATUS: CONECTADO -> {oldIp}')
                 #192.168.0.90 - marcos
 
-                bAtencao.config(state=tk.DISABLED)
+                bAtencao.config(state=tk.NORMAL)
                 eMessage.config(state=tk.NORMAL)
                 break
             except Exception as e:
@@ -232,7 +287,7 @@ def new_ip_selector():
 ###################################################################################################################################################
 def interface_grafica():
     # Inicializações
-    global current_date
+    global currentDate
     global jChatInterno
     global menuOpcoesNotificacoes
     global eMessage
@@ -241,8 +296,7 @@ def interface_grafica():
     global bAtencao
 
     # Verifica a data atual
-    current_date = datetime.now().strftime("%d-%m-%Y")
-    current_Time = datetime.now().strftime("%H:%M:%S")
+    thread_update_date_time()
 
     # Cria janela do chat
     jChatInterno = tk.Tk()
@@ -284,7 +338,7 @@ def interface_grafica():
     # Inicializa variavel global para verificar se o usuario quer receber notificação, se inicia em "True"
     jChatInterno.windowsNotification = True
 
-    ###################################################################################################################################################
+###################################################################################################################################################
 
     menuBar = tk.Menu(jChatInterno)
 
@@ -322,10 +376,10 @@ def interface_grafica():
 
     jChatInterno.deiconify()
     
-    thread_received_message()
-
     # Carrega uma vez a lista de mensagens presentes no LOG
-    messages = load_messages_from_file()
+    messages = load_messages_from_sqlite()
+
+    thread_received_message()
 
     send_entry_message()
 

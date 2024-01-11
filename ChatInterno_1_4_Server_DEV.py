@@ -3,13 +3,13 @@ import threading
 from datetime import datetime
 import tkinter as tk
 from tkinter import scrolledtext
+import sqlite3
 
 clients = []
-clientsToRemove = []
 messages = []
 lock = threading.Lock()
 running = True
-server_password = None
+file_name = f"chat_log.db"
 
 def handle_client(client_socket, address):
     while True:
@@ -20,8 +20,8 @@ def handle_client(client_socket, address):
 
             print(f"Received message from {address}: {message}")
 
-            # Salvar a mensagem no arquivo do histórico
-            save_message_to_file(message)
+            # Salvar a mensagem no banco de dados SQLite
+            save_message_to_sqlite(message)
 
             # Envie a mensagem para todos os clientes (se necessário)
             with lock:
@@ -33,28 +33,48 @@ def handle_client(client_socket, address):
 
     client_socket.close()
 
-def save_message_to_file(message):
-    global current_date
+def save_message_to_sqlite(message):
+    global file_name
     
-    file_name = f"chat_log_{current_date}.txt"
     try:
-        with open(file_name, "a") as file:
-            file.write(message + "\n")
+        messageSplited = message.split(';')
+    
+        mensagemData = messageSplited[0]
+        mensagemHora = messageSplited[1]
+        mensagemRemetente = messageSplited[2]
+        mensagemConteudo = messageSplited[3]
+        mensagemTipo = messageSplited[4]
+
+        mensagemDataHora = f"{mensagemData} {mensagemHora}"
     except Exception as e:
-        pass 
+        pass
 
-def verify_log_existence():
-    global current_date
-
-    file_name = f"chat_log_{current_date}.txt"
     try:
-        with open(file_name, "r") as file:
-            print("LidoComSucesso")
-            content = file.read()
-    except FileNotFoundError:
-        print("FileNotFoundError")
-        with open(file_name, "w") as file:
-            file.write(f"Ola, bem vindo ao chat, hoje é dia {current_date}" + "\n") 
+        with sqlite3.connect(file_name) as conexao:
+            cursor = conexao.cursor()
+            cursor.execute('INSERT INTO mensagens (data_hora, remetente, conteudo, tipo) VALUES (?, ?, ?, ?)', 
+                           (mensagemDataHora, mensagemRemetente, mensagemConteudo, mensagemTipo))
+    except Exception as e:
+        pass
+
+def verify_sqlite_existence():
+    global file_name
+
+    try:
+        with sqlite3.connect(file_name) as conexao:
+            cursor = conexao.cursor()
+
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mensagens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data_hora TEXT NOT NULL,
+                remetente TEXT NOT NULL,
+                conteudo TEXT NOT NULL,
+                tipo TEXT NOT NULL
+            )
+        ''')
+    except Exception as e:
+        pass
 
 def broadcast(message, sender_addr):
     to_remove = []
@@ -113,16 +133,11 @@ def update_connected_clients():
             print(clients)
             for client_socket in clients:
                 try:
-                    if client_socket is not None:
-                        # Obtenha informações sobre o cliente
-                        client_info = client_socket.getpeername()
-                        stClientesConectados.insert(tk.END, f"Endereço do Cliente: {client_info}\n")
-                    else:
-                        stClientesConectados.insert(tk.END, "Cliente desconectado\n")
-                except (socket.error, OSError) as e:
-                    stClientesConectados.insert(tk.END, f"socket.error - Erro ao obter informações do cliente: {e}\n")
+                    # Obtenha informações sobre o cliente
+                    client_info = client_socket.getpeername()
+                    stClientesConectados.insert(tk.END, f"Endereço do Cliente: {client_info}\n")
                 except Exception as e:
-                    stClientesConectados.insert(tk.END, f"Exception - Erro ao obter informações do cliente: {e}\n")
+                    stClientesConectados.insert(tk.END, f"Erro ao obter informações do cliente: {e}\n")
 
             stClientesConectados.config(state=tk.DISABLED)
             stClientesConectados.see(tk.END)  # Role para o final do texto
@@ -135,24 +150,6 @@ def update_connected_clients():
 def thread_update_connected_clients():
     # Thread para receber mensagens
     receive_thread = threading.Thread(target=update_connected_clients, daemon=True)
-    receive_thread.start()
-
-def verify_closed_clients():
-    global clientsToRemove
-
-    # Remove os clientes que causaram erros
-    try:
-        for client in clientsToRemove:
-            clients.remove(client)
-            clientsToRemove.remove(client)
-    except Exception as e:
-        print(f'Erro no verify_closed_clients: {e}')
-    finally:
-        jInterfaceServer.after(200, verify_closed_clients)
-
-def thread_verify_closed_clients():
-    # Thread para receber mensagens
-    receive_thread = threading.Thread(target=verify_closed_clients, daemon=True)
     receive_thread.start()
 
 def on_closing():
@@ -168,7 +165,7 @@ def interface_grafica():
     global stClientesConectados
 
     current_date = datetime.now().strftime("%d-%m-%Y") # Verifica a data atual
-    verify_log_existence() # Verifica se ja existe o arquivo de log, caso não exista, ele cria um novo com a dtaa atual
+    verify_sqlite_existence() # Verifica se ja existe o SQLite, caso não exista, ele cria um novo
 
     # Cria janela do chat
     jInterfaceServer = tk.Tk()
@@ -200,8 +197,6 @@ def interface_grafica():
     thread_start_server()
 
     #thread_update_connected_clients()
-
-    thread_verify_closed_clients()
 
     # mainLoop da janela principal
     jInterfaceServer.mainloop()
