@@ -4,14 +4,18 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import scrolledtext
 import sqlite3
+import json
+import time
 
 clients = []
 messages = []
 lock = threading.Lock()
 running = True
-file_name = f"chat_log.db"
+fileName = f"chat_log.db"
 
 def handle_client(client_socket, address):
+    global messages
+
     while True:
         try:
             message = client_socket.recv(1024).decode('utf-8')
@@ -20,12 +24,22 @@ def handle_client(client_socket, address):
 
             print(f"Received message from {address}: {message}")
 
-            # Salvar a mensagem no banco de dados SQLite
-            save_message_to_sqlite(message)
+            if message == "load_messages_from_sqlite":
+                messages = load_message_from_sqlite()
 
-            # Envie a mensagem para todos os clientes (se necessário)
-            with lock:
-                broadcast(message, address)
+                jsonMessages = json.dumps(messages)
+
+                # Envie a mensagem para todos os clientes (se necessário)
+                with lock:
+                    for individualMessage in messages:
+                        broadcast(individualMessage, address)
+            else:
+                # Salvar a mensagem no banco de dados SQLite
+                save_message_to_sqlite(message)
+
+                # Envie a mensagem para todos os clientes (se necessário)
+                with lock:
+                    broadcast(message, address)
 
         except Exception as e:
             print(f"Error handling client {address}: {e}")
@@ -34,39 +48,57 @@ def handle_client(client_socket, address):
     client_socket.close()
 
 def save_message_to_sqlite(message):
-    global file_name
+    global fileName
     
     try:
         messageSplited = message.split(';')
     
-        mensagemData = messageSplited[0]
-        mensagemHora = messageSplited[1]
-        mensagemRemetente = messageSplited[2]
-        mensagemConteudo = messageSplited[3]
-        mensagemTipo = messageSplited[4]
+        mensagemDataHora = messageSplited[0]
+        mensagemRemetente = messageSplited[1]
+        mensagemConteudo = messageSplited[2]
+        mensagemTipo = messageSplited[3]
 
-        mensagemDataHora = f"{mensagemData} {mensagemHora}"
     except Exception as e:
         pass
 
     try:
-        with sqlite3.connect(file_name) as conexao:
+        with sqlite3.connect(fileName) as conexao:
             cursor = conexao.cursor()
             cursor.execute('INSERT INTO mensagens (data_hora, remetente, conteudo, tipo) VALUES (?, ?, ?, ?)', 
                            (mensagemDataHora, mensagemRemetente, mensagemConteudo, mensagemTipo))
     except Exception as e:
         pass
 
-def verify_sqlite_existence():
-    global file_name
+def load_message_from_sqlite():
+    global currentDate
+    global fileName
 
     try:
-        with sqlite3.connect(file_name) as conexao:
+        #thread_update_date_time()
+
+        with sqlite3.connect(fileName) as conexao:
+            cursor = conexao.cursor()
+            cursor.execute("SELECT * FROM mensagens WHERE data_hora >= ?", (f"{currentDate} 00:00:00",))
+            mensagens_do_dia = cursor.fetchall()
+            print("As mensagens carregadas do SQLite são: ", mensagens_do_dia)
+            result = []
+            for mensagem in mensagens_do_dia:
+                mensagem_str = ';'.join(map(str, mensagem))
+                # Aplicar as tags aqui
+                result.append(mensagem_str)
+            return result
+    except Exception as e:
+        pass
+
+def verify_sqlite_existence():
+    global fileName
+
+    try:
+        with sqlite3.connect(fileName) as conexao:
             cursor = conexao.cursor()
 
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS mensagens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 data_hora TEXT NOT NULL,
                 remetente TEXT NOT NULL,
                 conteudo TEXT NOT NULL,
@@ -78,11 +110,10 @@ def verify_sqlite_existence():
 
 def broadcast(message, sender_addr):
     to_remove = []
-
+    time.sleep(0.001) #Delay de 1ms
     for client in clients:
         try:
-            # Verifica se o cliente ainda está na lista e é um objeto de soquete
-            #if client in clients and isinstance(client, socket.socket):
+            #Envia mensagem para todos os clientes conectados
             client.sendall(message.encode('utf-8'))
         except Exception as e:
             print(f"Error broadcasting message to client: {e}")
@@ -157,14 +188,33 @@ def on_closing():
 
     jInterfaceServer.destroy()
 
+def update_date_time():
+    global currentDate
+    global currentTime
+
+    while True:
+        currentDate = datetime.now().strftime("%d-%m-%Y")
+        currentTime = datetime.now().strftime("%H:%M:%S")
+    
+        #print("currentDate: ", currentDate)
+        #print("currentTime: ", currentTime)
+        
+        time.sleep(1)
+
+def thread_update_date_time():
+    # Thread atualizar a data e hora atual
+    updateDateTimeThread = threading.Thread(target=update_date_time, daemon=True)
+    updateDateTimeThread.start()
+
 ###################################################################################################################################################
     
 def interface_grafica():
-    global current_date
+    global currentDate
     global jInterfaceServer
     global stClientesConectados
 
-    current_date = datetime.now().strftime("%d-%m-%Y") # Verifica a data atual
+    thread_update_date_time()
+    
     verify_sqlite_existence() # Verifica se ja existe o SQLite, caso não exista, ele cria um novo
 
     # Cria janela do chat
