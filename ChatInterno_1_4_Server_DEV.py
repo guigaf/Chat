@@ -15,6 +15,9 @@ fileName = f"chat_log.db"
 
 def handle_client(client_socket, address):
     global messages
+    global clients
+
+    to_remove = []
 
     while True:
         try:
@@ -24,22 +27,37 @@ def handle_client(client_socket, address):
 
             print(f"Received message from {address}: {message}")
 
-            if message == "load_messages_from_sqlite":
-                messages = load_message_from_sqlite()
+            if "load_messages_from_server;" in message:
+                particao = message.split(";")
 
-                jsonMessages = json.dumps(messages)
+                messageLoad = particao[0]
+                messageData = particao[1]
+
+                messages = load_message_from_sqlite(messageData)
+
+                #jsonMessages = json.dumps(messages)
 
                 # Envie a mensagem para todos os clientes (se necessário)
                 with lock:
                     for individualMessage in messages:
-                        broadcast(individualMessage, address)
+                        broadcast(individualMessage, address, messageLoad)
             else:
                 # Salvar a mensagem no banco de dados SQLite
                 save_message_to_sqlite(message)
 
+                mensagemDataHora, mensagemRemetente, mensagemConteudo, mensagemTipo = separa_mensagem(message)
+
+                if mensagemTipo == "saida":
+                    for client in clients:
+                        laddr = client.getsockname()
+                        if laddr[0] == address[0]:
+                            print(f"O cliente {mensagemRemetente} do IP {address[0]} saiu")
+                            clients.remove(client)
+
                 # Envie a mensagem para todos os clientes (se necessário)
                 with lock:
-                    broadcast(message, address)
+                    messageLoad = "send_messages_to_client"
+                    broadcast(message, address, messageLoad)
 
         except Exception as e:
             print(f"Error handling client {address}: {e}")
@@ -51,12 +69,7 @@ def save_message_to_sqlite(message):
     global fileName
     
     try:
-        messageSplited = message.split(';')
-    
-        mensagemDataHora = messageSplited[0]
-        mensagemRemetente = messageSplited[1]
-        mensagemConteudo = messageSplited[2]
-        mensagemTipo = messageSplited[3]
+        mensagemDataHora, mensagemRemetente, mensagemConteudo, mensagemTipo = separa_mensagem(message)
 
     except Exception as e:
         pass
@@ -69,28 +82,35 @@ def save_message_to_sqlite(message):
     except Exception as e:
         pass
 
-def load_message_from_sqlite():
-    global currentDate
+def separa_mensagem(message):
+    messageSplited = message.split(';')
+
+    mensagemDataHora = messageSplited[0]
+    mensagemRemetente = messageSplited[1]
+    mensagemConteudo = messageSplited[2]
+    mensagemTipo = messageSplited[3]
+
+    return mensagemDataHora, mensagemRemetente, mensagemConteudo, mensagemTipo
+
+def load_message_from_sqlite(mensagemData):
     global fileName
 
     try:
-        #thread_update_date_time()
-
         with sqlite3.connect(fileName) as conexao:
             cursor = conexao.cursor()
-            cursor.execute("SELECT * FROM mensagens WHERE data_hora >= ?", (f"{currentDate} 00:00:00",))
+            cursor.execute("SELECT * FROM mensagens WHERE data_hora >= ?", (f"{mensagemData} 00:00:00",))
             mensagens_do_dia = cursor.fetchall()
-            print("As mensagens carregadas do SQLite são: ", mensagens_do_dia)
             result = []
             for mensagem in mensagens_do_dia:
                 mensagem_str = ';'.join(map(str, mensagem))
-                # Aplicar as tags aqui
                 result.append(mensagem_str)
             return result
     except Exception as e:
         pass
 
+
 def verify_sqlite_existence():
+    # Verifica se ja existe o SQLite, caso não exista, ele cria um novo
     global fileName
 
     try:
@@ -108,13 +128,35 @@ def verify_sqlite_existence():
     except Exception as e:
         pass
 
-def broadcast(message, sender_addr):
+def broadcast(message, address, messageLoad):
+    global clients
     to_remove = []
-    time.sleep(0.001) #Delay de 1ms
+
     for client in clients:
         try:
-            #Envia mensagem para todos os clientes conectados
-            client.sendall(message.encode('utf-8'))
+            laddr = client.getsockname()
+            raddr = client.getpeername() 
+        
+            # Envia apenas para o cliente que requisitou
+            if "load_messages_from_server" in messageLoad:
+                if address in (laddr, raddr):
+                    try:
+                        #Envia mensagem para o cliente
+                        time.sleep(0.001) #Delay de 1ms
+                        client.sendall(message.encode('utf-8'))
+                    except Exception as e:
+                        print(f"Error load_messages_from_server: {e}")
+                        to_remove.append(client)
+
+            # Envia para todos os clientes conectados
+            elif "send_messages_to_client" in messageLoad:
+                try:
+                    #Envia mensagem para o cliente
+                    client.sendall(message.encode('utf-8'))
+                except Exception as e:
+                    print(f"Error send_messages_to_client: {e}")
+                    to_remove.append(client)
+
         except Exception as e:
             print(f"Error broadcasting message to client: {e}")
             to_remove.append(client)
@@ -124,11 +166,14 @@ def broadcast(message, sender_addr):
         clients.remove(client)
 
 def start_server():
+    global clients
+    global running
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind(('0.0.0.0', 5555))
     server.listen(5)
     print("Server listening on port 5555...")
-    global running
+
 
     while running:
         try:
@@ -140,7 +185,7 @@ def start_server():
             client_handler.start()
 
         except KeyboardInterrupt:
-            print("Server is shutting down.")
+            on_closing()
             running = False
 
     # Fechar todos os sockets
@@ -155,6 +200,8 @@ def thread_start_server():
     receive_thread.start()
 
 def update_connected_clients():
+    global clients
+    
     try:
         with lock:
             stClientesConectados.config(state=tk.NORMAL)
@@ -186,6 +233,7 @@ def thread_update_connected_clients():
 def on_closing():
     global jInterfaceServer
 
+    print("O server está sendo desligado...")
     jInterfaceServer.destroy()
 
 def update_date_time():
@@ -215,7 +263,7 @@ def interface_grafica():
 
     thread_update_date_time()
     
-    verify_sqlite_existence() # Verifica se ja existe o SQLite, caso não exista, ele cria um novo
+    verify_sqlite_existence()
 
     # Cria janela do chat
     jInterfaceServer = tk.Tk()

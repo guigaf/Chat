@@ -1,6 +1,7 @@
 import socket
 import tkinter as tk
-from tkinter import scrolledtext, simpledialog
+from tkinter import scrolledtext, simpledialog, Toplevel
+from tkcalendar import Calendar
 from datetime import datetime
 import threading
 from queue import Queue
@@ -10,6 +11,9 @@ import time
 #plyer.platforms.win.notification
 
 messages = []
+
+filtroData = False
+filtroHora = True
 
 ###################################################################################################################################################
 # Função para obter o nome de usuário
@@ -23,52 +27,58 @@ def get_username():
 def send_message(event=None):
     global eMessage
     global client_socket
-    global currentDate
-    global currentTime
+    global dataAtual
+    global horaAtual
 
     message = eMessage.get()
     nickname = get_username()
     mensagemTipo = "mensagem"
     if message and nickname:
-        full_message = f"{currentDate} {currentTime};{nickname};{message};{mensagemTipo}"
+        full_message = f"{dataAtual} {horaAtual};{nickname};{message};{mensagemTipo}"
 
         client_socket.sendall(full_message.encode('utf-8'))
         eMessage.delete(0, tk.END)
 
 def send_entry_message():
     global client_socket
-    global currentDate
-    global currentTime
+    global dataAtual
+    global horaAtual
 
     message = f"entrou no chat."
     nickname = get_username()
     mensagemTipo = "entrada"
-    full_message = f"{currentDate} {currentTime};{nickname};{message};{mensagemTipo}"
+    full_message = f"{dataAtual} {horaAtual};{nickname};{message};{mensagemTipo}"
     client_socket.sendall(full_message.encode('utf-8'))
 
 def send_warning_message():
     global client_socket
-    global currentDate
-    global currentTime
+    global dataAtual
+    global horaAtual
 
     message = f"--ATENÇÃO--"
     nickname = get_username()
     mensagemTipo = "atencao"
-    full_message = f"{currentDate} {currentTime};{nickname};{message};{mensagemTipo}"
+    full_message = f"{dataAtual} {horaAtual};{nickname};{message};{mensagemTipo}"
     client_socket.sendall(full_message.encode('utf-8'))
 
 def send_exit_message():
     global client_socket
-    global currentDate
-    global currentTime
+    global dataAtual
+    global horaAtual
 
     message = f"saiu do chat."
     nickname = get_username()
     mensagemTipo = "saida"
-    full_message = f"{currentDate} {currentTime};{nickname};{message};{mensagemTipo}"
+    full_message = f"{dataAtual} {horaAtual};{nickname};{message};{mensagemTipo}"
     client_socket.sendall(full_message.encode('utf-8'))
 
 def apply_tags_and_filter(message):
+    global filtroData
+    global filtroHora
+
+    filtroRemetente = True
+    filtroConteudo = True
+    filtroTipo = False
 
     particao = message.split(";")
 
@@ -80,13 +90,6 @@ def apply_tags_and_filter(message):
     remetente = particao[1]
     conteudo = particao[2]
     tipo = particao[3]
-
-    # __VERIFICAR__
-    filtroData = True
-    filtroHora = True
-    filtroRemetente = True
-    filtroConteudo = True
-    filtroTipo = False
 
     mensagemFormatada = ''
 
@@ -138,7 +141,6 @@ def apply_tags_and_filter(message):
         return mensagemFormatada, None
 
 def update_chat_box():
-    global jChatInterno
     global stChatBox
     global messages
 
@@ -174,11 +176,10 @@ def update_chat_box():
     stChatBox.config(state=tk.DISABLED)
 
 def windows_notification(message):
-    global jChatInterno
+    global jChatPrincipal
 
     particao = message.split(";")
 
-    #idMensagem = particao[0]
     dataHora = particao[0]
     remetente = particao[1]
     conteudo = particao[2]
@@ -187,7 +188,7 @@ def windows_notification(message):
     msgNickname = remetente
     myNickname = get_username()
     try:
-        if jChatInterno.windowsNotification and myNickname not in msgNickname and tipo == "atencao":
+        if jChatPrincipal.windowsNotification and myNickname not in msgNickname and tipo == "atencao":
                 notification.notify(title='Atenção!', message=f'{msgNickname} esta chamando sua atenção.', app_name='ATENÇÃO!', timeout=1, )
     except Exception as e:
         print(f'Erro de notificação do Windows: {e}')
@@ -196,6 +197,7 @@ def windows_notification(message):
 def receive_messages():
     global messages
     global client_socket
+    global jChatPrincipal
 
     while True:
         try:
@@ -215,62 +217,51 @@ def receive_messages():
             break
         
         finally:
-            jChatInterno.after(200, update_chat_box)
+            jChatPrincipal.after(200, update_chat_box)
     
-def load_messages_from_sqlite():
+def load_messages_from_server(buscaData):
     global client_socket
 
-    message = "load_messages_from_sqlite"
+    message = f"load_messages_from_server;{buscaData}"
     client_socket.sendall(message.encode('utf-8'))
 
-#def load_messages_from_server(messageServer):
-#    global currentDate
-#
-#    try:
-#        thread_update_date_time()
-#
-#        result = []
-#        for mensagem in messageServer:
-#            mensagem_str = ';'.join(map(str, mensagem))
-#            # Aplicar as tags aqui
-#            result.append(mensagem_str)
-#        return result
-#    except Exception as e:
-#        pass
-
 def update_date_time():
-    global currentDate
-    global currentTime
+    global dataAtual
+    global horaAtual
 
     while True:
-        currentDate = datetime.now().strftime("%d-%m-%Y")
-        currentTime = datetime.now().strftime("%H:%M:%S")
+        dataAtual = datetime.now().strftime("%d-%m-%Y")
+        horaAtual = datetime.now().strftime("%H:%M:%S")
 
-        #print("currentDate: ", currentDate)
-        #print("currentTime: ", currentTime)
+        #print("dataAtual: ", dataAtual)
+        #print("horaAtual: ", horaAtual)
 
         time.sleep(1)
     
 def on_closing():
-    global jChatInterno
+    global jChatPrincipal
+    global client_socket
 
     if newIp != None:
         send_exit_message()
-    jChatInterno.destroy()
+
+        client_socket.close()
+
+    jChatPrincipal.destroy()
 
 def windows_notification_true():
-    global jChatInterno
+    global jChatPrincipal
     global menuOpcoesNotificacoes
 
-    jChatInterno.windowsNotification = True
+    jChatPrincipal.windowsNotification = True
     menuOpcoesNotificacoes.entryconfig("Habilitar notificações", state='disabled')
     menuOpcoesNotificacoes.entryconfig("Desabilitar notificações", state='active')
 
 def windows_notification_false():
-    global jChatInterno
+    global jChatPrincipal
     global menuOpcoesNotificacoes
 
-    jChatInterno.windowsNotification = False
+    jChatPrincipal.windowsNotification = False
     menuOpcoesNotificacoes.entryconfig("Habilitar notificações", state='active')
     menuOpcoesNotificacoes.entryconfig("Desabilitar notificações", state='disabled')
 
@@ -291,6 +282,7 @@ def new_ip_selector():
     global bAtencao
     global oldIp
     global newIp
+    global jChatPrincipal
 
     while True:
         newIp = simpledialog.askstring("Novo Endereço IP", "Digite o novo endereço IP:")
@@ -299,14 +291,14 @@ def new_ip_selector():
                 # Seleciona o endereço de IP que vai se conectar
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client_socket.connect((newIp, 5555))
-                jChatInterno.title(f'Bem Vindo! - {nickname} - STATUS: CONECTADO -> {newIp}')
+                jChatPrincipal.title(f'Bem Vindo! - {nickname} - STATUS: CONECTADO -> {newIp}')
 
                 oldIp = newIp
                 bAtencao.config(state=tk.NORMAL)
                 eMessage.config(state=tk.NORMAL)
                 break
             except Exception as e:
-                jChatInterno.title(f'Bem Vindo! - {nickname} - STATUS: DESCONECTADO')
+                jChatPrincipal.title(f'Bem Vindo! - {nickname} - STATUS: DESCONECTADO')
                 bAtencao.config(state=tk.DISABLED)
                 eMessage.config(state=tk.DISABLED)
                 print(f'Erro no new_ip_selector: {e}')
@@ -316,13 +308,13 @@ def new_ip_selector():
                 # Seleciona o endereço de IP que vai se conectar
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client_socket.connect((oldIp, 5555))
-                jChatInterno.title(f'Bem Vindo! - {nickname} - STATUS: CONECTADO -> {oldIp}')
+                jChatPrincipal.title(f'Bem Vindo! - {nickname} - STATUS: CONECTADO -> {oldIp}')
 
                 bAtencao.config(state=tk.NORMAL)
                 eMessage.config(state=tk.NORMAL)
                 break
             except Exception as e:
-                jChatInterno.title(f'Bem Vindo! - {nickname} - STATUS: DESCONECTADO')
+                jChatPrincipal.title(f'Bem Vindo! - {nickname} - STATUS: DESCONECTADO')
                 bAtencao.config(state=tk.DISABLED)
                 eMessage.config(state=tk.DISABLED)
                 print(f'Erro no new_ip_selector: {e}')
@@ -331,43 +323,34 @@ def new_ip_selector():
             on_closing()
             break
 
-def recarregar_mensagens():
-    global stChatBox
-    global messages
-
-    stChatBox.config(state=tk.NORMAL) # Habilita o ChatBox para edição
-
-    stChatBox.delete(1.0, tk.END) # Limpa o ChatBox
-    messages.clear() # Limpa a lista de mensagens
-    load_messages_from_sqlite() # Faz uma requisição ao servidor para retornar todas as mensagens do banco
-    
-    stChatBox.config(state=tk.DISABLED)# desabilita o ChatBox para edição
-
 ###################################################################################################################################################
-def interface_grafica():
+def janela_principal():
     # Inicializações
-    global currentDate
-    global jChatInterno
+    global dataAtual
+    global jChatPrincipal
     global menuOpcoesNotificacoes
     global eMessage
     global stChatBox
     global messages
     global bAtencao
+    global cbCurrentDateVar
+    global cbCurrentTimeVar
+    global dataSelecionadaFormatada
 
     # Verifica a data atual
     thread_update_date_time()
 
     # Cria janela do chat
-    jChatInterno = tk.Tk()
+    jChatPrincipal = tk.Tk()
 
     # Coloca um titulo na janela do chat
-    jChatInterno.title(f'Bem Vindo! - {nickname} - STATUS: DESCONECTADO')
+    jChatPrincipal.title(f'Bem Vindo! - {nickname} - STATUS: DESCONECTADO')
 
     # Adiciona um script ao botão de fechar padrão da janela
-    jChatInterno.protocol("WM_DELETE_WINDOW", on_closing)
+    jChatPrincipal.protocol("WM_DELETE_WINDOW", on_closing)
 
     # Adiciona e configura um ScrolledText a janela
-    stChatBox = scrolledtext.ScrolledText(jChatInterno, wrap=tk.WORD, width=60, height=10)
+    stChatBox = scrolledtext.ScrolledText(jChatPrincipal, wrap=tk.WORD, width=60, height=10)
     stChatBox.grid(row=0, column=0, columnspan=3, padx=10, pady=10, sticky='nsew')
     stChatBox.tag_config("exit_message", foreground="#FF0000")
     stChatBox.tag_config("entry_message", foreground="#0000FF")
@@ -375,7 +358,7 @@ def interface_grafica():
     stChatBox.config(state=tk.DISABLED)
 
     # Adiciona um campo apra digitar mensagem
-    eMessage = tk.Entry(jChatInterno, width=60)
+    eMessage = tk.Entry(jChatPrincipal, width=60)
     eMessage.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky='ew')
     eMessage.config(state=tk.DISABLED)
 
@@ -383,23 +366,23 @@ def interface_grafica():
     eMessage.bind("<Return>", send_message)
 
     # Adiciona um campo para chamar a atenção do usuario
-    bAtencao = tk.Button(jChatInterno, text="ATENÇÃO", command=send_warning_message)
+    bAtencao = tk.Button(jChatPrincipal, text="ATENÇÃO", command=send_warning_message)
     bAtencao.grid(row=1, column=2, padx=10, pady=10, sticky='e')
     bAtencao.config(state=tk.DISABLED)
 
     # Configuração do peso da linha e coluna
-    jChatInterno.grid_rowconfigure(0, weight=1)
-    jChatInterno.grid_rowconfigure(1, weight=0)
-    jChatInterno.grid_columnconfigure(0, weight=1)
-    jChatInterno.grid_columnconfigure(1, weight=1)
-    jChatInterno.grid_columnconfigure(2, weight=0)
+    jChatPrincipal.grid_rowconfigure(0, weight=1)
+    jChatPrincipal.grid_rowconfigure(1, weight=0)
+    jChatPrincipal.grid_columnconfigure(0, weight=1)
+    jChatPrincipal.grid_columnconfigure(1, weight=1)
+    jChatPrincipal.grid_columnconfigure(2, weight=0)
 
     # Inicializa variavel global para verificar se o usuario quer receber notificação, se inicia em "True"
-    jChatInterno.windowsNotification = True
+    jChatPrincipal.windowsNotification = True
 
 ###################################################################################################################################################
 
-    menuBar = tk.Menu(jChatInterno)
+    menuBar = tk.Menu(jChatPrincipal)
 
     # Criar o menu "Arquivo" com alguns itens
     menuArquivo = tk.Menu(menuBar, tearoff=0)
@@ -423,28 +406,138 @@ def interface_grafica():
     menuOpcoes.add_command(label="Alterar Servidor", command=new_ip_selector)
     menuOpcoes.add_separator()
     menuOpcoes.add_cascade(label="Notificações", menu=menuOpcoesNotificacoes)
-    menuOpcoes.add_command(label="Recarregar mensagens", command=recarregar_mensagens)
+    menuOpcoes.add_command(label="Histórico", command=janela_opcoes)
 
     # Adicionar a barra de menu à janela
-    jChatInterno.config(menu=menuBar)
+    jChatPrincipal.config(menu=menuBar)
 
 ###################################################################################################################################################
 
-    jChatInterno.iconify()
+    jChatPrincipal.iconify()
+
+    # Variável para armazenar o estado do checkbox
+    cbCurrentDateVar = tk.BooleanVar()
+    cbCurrentDateVar.set(filtroData)
+    
+    cbCurrentTimeVar = tk.BooleanVar()
+    cbCurrentTimeVar.set(filtroHora)
 
     new_ip_selector()
     if newIp != None:
-        jChatInterno.deiconify()
+        jChatPrincipal.deiconify()
         
         # Carrega uma vez a lista de mensagens presentes no LOG
-        load_messages_from_sqlite()
+        load_messages_from_server(dataAtual)
 
         thread_received_message()
 
         send_entry_message()
 
         # mainLoop da janela principal
-        jChatInterno.mainloop()
+        jChatPrincipal.mainloop()
+
+###################################################################################################################################################
+
+def recarregar_mensagens():
+    global jChatOpcoes
+    global stChatBox
+    global messages
+    global dataSelecionadaFormatada
+
+    stChatBox.config(state=tk.NORMAL) # Habilita o ChatBox para edição
+
+    stChatBox.delete(1.0, tk.END) # Limpa o ChatBox
+    messages.clear() # Limpa a lista de mensagens
+    load_messages_from_server(dataSelecionadaFormatada) # Faz uma requisição ao servidor para retornar todas as mensagens do banco
+    
+    stChatBox.config(state=tk.DISABLED)# desabilita o ChatBox para edição    
+
+    jChatOpcoes.destroy()
+
+def cbCurrentDate_command():
+    global filtroData
+    global cbCurrentDateVar
+
+    filtroData = True if cbCurrentDateVar.get() else False
+
+def cbCurrentTime_command():
+    global filtroHora
+    global cbCurrentTimeVar
+
+    filtroHora = True if cbCurrentTimeVar.get() else False
+
+def fecha_janela_opcoes():
+    recarregar_mensagens()
+
+##########################################################################################
+################             SELETOR DE DATA #############################################
+def selecionar_data():
+    global jSeletorData
+    global calSeletorData
+    global lData
+    global dataSelecionadaFormatada
+
+    # Seleciona a data do calendario, ela vem no formato String
+    dataSelecionadaStr = calSeletorData.get_date()
+
+    # Altera a data do calendario do formato String para DateTime
+    dataSelecionadaDateTime = datetime.strptime(dataSelecionadaStr, "%m/%d/%y")
+
+    # Altera a data para o formato String aplicando formatação
+    dataSelecionadaFormatada = dataSelecionadaDateTime.strftime("%d-%m-%Y")
+    lData.config(text=dataSelecionadaFormatada)
+    jSeletorData.destroy()
+
+def abrir_seletor_data():
+    global jSeletorData
+    global dataAtual
+    global horaAtual
+    global calSeletorData
+
+    seletorDia = datetime.now().strftime("%d")
+    seletorMes = datetime.now().strftime("%m")
+    seletorAno = datetime.now().strftime("%Y")    
+
+    jSeletorData = tk.Toplevel(jChatOpcoes)
+    jSeletorData.title("Seletor de Data")
+    
+    calSeletorData = Calendar(jSeletorData, selectmode="day", year=int(seletorAno), month=int(seletorMes), day=int(seletorDia))
+    calSeletorData.pack(padx=10, pady=10)
+
+    bSeletorData = tk.Button(jSeletorData, text="OK", command=selecionar_data)
+    bSeletorData.pack(pady=10)
+################             SELETOR DE DATA #############################################
+##########################################################################################
+    
+def janela_opcoes():
+    global jChatOpcoes
+    global cbCurrentDateVar
+    global cbCurrentTimeVar
+    global lData
+    global bDateSelector
+    global dataAtual
+    global dataSelecionadaFormatada
+
+    dataSelecionadaFormatada = dataAtual
+
+    jChatOpcoes = Toplevel(jChatPrincipal)
+    jChatOpcoes.title("Opções")
+
+    # Adiciona um script ao botão de fechar padrão da janela
+    jChatOpcoes.protocol("WM_DELETE_WINDOW", fecha_janela_opcoes)
+
+    cbCurrentDate = tk.Checkbutton(jChatOpcoes, text="Data", variable=cbCurrentDateVar, command=cbCurrentDate_command)
+    cbCurrentDate.grid(row=0, column=0, padx=10, pady=10)
+
+    cbCurrentTime = tk.Checkbutton(jChatOpcoes, text="Hora", variable=cbCurrentTimeVar, command=cbCurrentTime_command)
+    cbCurrentTime.grid(row=0, column=1, padx=10, pady=10)
+
+    lData = tk.Label(jChatOpcoes, text=dataAtual)
+    lData.grid(row=1, column=0, padx=10, pady=10)
+
+    # Seletor de data
+    bDateSelector = tk.Button(jChatOpcoes, text="...", command=abrir_seletor_data)
+    bDateSelector.grid(row=1, column=1, padx=0, pady=10)
 
 ###################################################################################################################################################
 
@@ -457,4 +550,4 @@ oldIp = None
 
 if __name__ == "__main__":
     # Inicia a interface gráfica
-    interface_grafica()
+    janela_principal()
