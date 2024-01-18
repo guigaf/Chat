@@ -4,11 +4,11 @@ block_cipher = None
 
 
 a = Analysis(
-    ['ChatInterno_1_2_Client.py'],
+    ['ChatInterno_1_4_Client_DEV.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['plyer.platforms.win.notification'],
+    hiddenimports=['plyer.platforms.win.notification', 'tkcalendar'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -27,7 +27,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='CPSM3.1_Client.exe',
+    name='Chat1.4_Client.exe',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

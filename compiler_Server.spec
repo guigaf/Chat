@@ -4,7 +4,7 @@ block_cipher = None
 
 
 a = Analysis(
-    ['ChatInterno_1_2_Server.py'],
+    ['ChatInterno_1_4_Server_DEV.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -27,7 +27,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='CPSM3.1_Server.exe',
+    name='Chat1.4_Server.exe',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

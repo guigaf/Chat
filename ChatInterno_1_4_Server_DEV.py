@@ -144,6 +144,7 @@ def broadcast(message, address, messageLoad):
                         #Envia mensagem para o cliente
                         time.sleep(0.001) #Delay de 1ms
                         client.sendall(message.encode('utf-8'))
+                        print("Send load_messages_from_server:", message)
                     except Exception as e:
                         print(f"Error load_messages_from_server: {e}")
                         to_remove.append(client)
@@ -153,6 +154,7 @@ def broadcast(message, address, messageLoad):
                 try:
                     #Envia mensagem para o cliente
                     client.sendall(message.encode('utf-8'))
+                    print("Send send_messages_to_client:", message)
                 except Exception as e:
                     print(f"Error send_messages_to_client: {e}")
                     to_remove.append(client)
